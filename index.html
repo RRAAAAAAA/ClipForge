@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClipForge</title>
+<style>
+:root{--bg:#15233b;--panel:#1d3052;--ink:#eef2f8;--mute:#9db0cf;--hot:#ff5470;--ok:#4fd1a5}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Trebuchet MS",system-ui,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:28px 18px 80px}
+h1{font:700 2.4rem/1.1 Georgia,serif;margin:0 0 6px}
+p.sub{color:var(--mute);margin:0 0 22px}
+.bar{display:flex;gap:10px;flex-wrap:wrap}
+input,select,textarea,button{font:inherit;color:var(--ink);background:#0f1b30;border:1px solid #38507c;border-radius:8px;padding:10px 12px}
+.bar input{flex:1;min-width:220px}
+button{background:var(--hot);border-color:var(--hot);font-weight:700;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+button.alt{background:transparent;border-color:#38507c}
+:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
+#status{margin:16px 0;color:var(--mute);min-height:1.5em}
+#status.err{color:#ff9aa9}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:20px}
+.clip{background:var(--panel);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.vid{aspect-ratio:9/16;background:#0a1220;border-radius:10px;display:grid;place-items:center;color:var(--mute);overflow:hidden}
+.vid video{width:100%;height:100%;object-fit:cover}
+.score{font-weight:700;color:var(--ok)}
+.clip input,.clip textarea,.clip select{width:100%}
+textarea{min-height:90px;resize:vertical}
+.clip input[type=checkbox]{width:auto;margin-right:8px}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+a.dl{display:block;text-align:center;text-decoration:none;color:var(--ink);background:var(--ok);color:#06231a;font-weight:700;border-radius:8px;padding:10px}
+.why{color:var(--mute);font-size:.9rem;margin:0}
+[hidden]{display:none!important}
+.tabs{display:flex;gap:8px;margin:0 0 12px}
+.tabs .tab{padding:8px 16px}
+.tabs .tab.on{background:var(--hot);border-color:var(--hot)}
+input[type=file]{flex:1;min-width:220px}
+.opt{margin-top:12px;padding:12px;border:1px dashed #38507c;border-radius:10px}
+.opt b{display:block}
+.opt small,#bstatus,#ustatus,#bspace{color:var(--mute)}
+#bspace{margin-top:8px;font-weight:600;color:var(--text,#fff)}
+#blist{list-style:none;margin:8px 0 0;padding:0}
+#blist li{display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #2a3a5c}
+#blist li span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#blist li em{font-style:normal;color:var(--mute)}
+#blist button{padding:4px 10px}
+.style{margin:12px 0 0}
+.style label{display:block;font-weight:600;margin-bottom:6px}
+</style>
+</head>
+<body>
+<main>
+  <h1>ClipForge</h1>
+  <p class="sub">Paste a YouTube link or upload your own footage. Get vertical clips with beat-synced B-roll, music, titles and scores you can edit.</p>
+  <div class="tabs" role="tablist">
+    <button class="alt tab on" data-tab="yt" role="tab">YouTube link</button>
+    <button class="alt tab" data-tab="up" role="tab">Upload footage</button>
+  </div>
+  <div class="bar" id="paneYt">
+    <input id="url" placeholder="https://www.youtube.com/watch?v=..." aria-label="YouTube link">
+  </div>
+  <div class="bar" id="paneUp" hidden>
+    <input id="file" type="file" accept="video/*,.mp4,.mov,.mkv,.webm" aria-label="Video to edit">
+  </div>
+  <p class="sub" id="upHint" hidden style="margin:8px 0 0">Your video gets beat-synced B-roll, upbeat music and no dead air. Someone must be talking: the clips are picked from what is said.</p>
+  <div class="style">
+    <label for="style">Editing style</label>
+    <select id="style" aria-label="Editing style">
+      <option value="square">1:1 square in the middle (9:16 frame, B-roll inside the square)</option>
+      <option value="full">Full frame (fills the whole 9:16 screen)</option>
+    </select>
+  </div>
+  <div class="bar" style="margin-top:10px">
+    <select id="count" aria-label="Number of clips"><option value="1">1 clip</option><option value="2">2 clips</option><option value="3" selected>3 clips</option><option value="4">4 clips</option><option value="5">5 clips</option></select>
+    <button id="go">Generate clips</button>
+  </div>
+  <div class="opt">
+    <b>B-roll footage (optional)</b>
+    <small>Upload one or more videos of your own (cars, wins, money, teaching, ...). ClipForge finds the scenes in them and uses them as B-roll where they fit what is said. Anything that does not fit comes from Pixabay stock.</small>
+    <div class="bar" style="margin-top:8px"><input id="bfile" type="file" multiple accept="video/*,.mp4,.mov,.mkv,.webm" aria-label="B-roll footage files"></div>
+    <div id="bspace" role="status"></div>
+    <ul id="blist"></ul>
+    <div id="bstatus" role="status"></div>
+  </div>
+  </div>
+  <div id="status" role="status"></div>
+  <div id="grid"></div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+let MUSIC = [];
+fetch('/api/music').then((r) => r.json()).then((j) => (MUSIC = j)).catch(() => {});
+const status = (t, err) => { const s = $('#status'); s.textContent = t; s.className = err ? 'err' : ''; };
+const post = async (u, b) => {
+  const r = await fetch(u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+};
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// start a background job on the server, then check on it every 2 seconds until it finishes
+const job = async (u, b, tick) => {
+  const { job: id } = await post(u, b);
+  const t0 = Date.now();
+  for (let fails = 0; ;) {
+    await sleep(2000);
+    let r;
+    try { r = await (await fetch('/api/job/' + id)).json(); } catch { if (++fails > 15) throw new Error('Lost connection to the server.'); continue; }
+    fails = 0;
+    if (r.status === 'done') return r;
+    if (r.status === 'error') throw new Error(r.error);
+    if (tick) tick(Math.round((Date.now() - t0) / 1000));
+  }
+};
+
+// send a file to the server with a progress callback (fetch cannot report upload progress)
+const upload = (file, kind, onp) => new Promise((ok, bad) => {
+  const x = new XMLHttpRequest();
+  x.open('POST', `/api/upload?kind=${kind}&name=${encodeURIComponent(file.name)}`);
+  x.setRequestHeader('content-type', 'application/octet-stream');
+  x.upload.onprogress = (e) => e.lengthComputable && onp(Math.round((e.loaded / e.total) * 100));
+  x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch {} x.status < 300 && j.id ? ok(j) : bad(new Error(j.error || 'Upload failed.')); };
+  x.onerror = () => bad(new Error('Upload failed. Check your connection and try again.'));
+  x.send(file);
+});
+
+let TAB = 'yt', GENERATING = false;
+const BROLLS = []; // uploaded B-roll files: { id, name, state: 'busy' | 'ready' | 'error', text }
+document.querySelectorAll('.tab').forEach((b) => (b.onclick = () => {
+  TAB = b.dataset.tab;
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t === b));
+  $('#paneYt').hidden = TAB !== 'yt'; $('#paneUp').hidden = TAB !== 'up'; $('#upHint').hidden = TAB !== 'up';
+}));
+
+const spaceText = (j) => `B-roll space: ${j.leftMB} MB left of ${j.quotaMB} MB`;
+const showSpace = (j) => ($('#bspace').textContent = spaceText(j));
+fetch('/api/broll-space').then((r) => r.json()).then(showSpace).catch(() => {});
+const mbText = (n) => (n >= 1 ? n.toFixed(1) : n.toFixed(2)) + ' MB';
+const brollSrc = () => BROLLS.filter((b) => b.state === 'ready').map((b) => b.id);
+const syncGo = () => { $('#go').disabled = GENERATING || BROLLS.some((b) => b.state === 'busy'); };
+
+function drawBrolls() {
+  const ul = $('#blist');
+  ul.innerHTML = '';
+  BROLLS.forEach((b, i) => {
+    const li = document.createElement('li');
+    const name = document.createElement('span'); name.textContent = b.name;
+    const st = document.createElement('em'); st.textContent = b.text;
+    const rm = document.createElement('button'); rm.className = 'alt'; rm.textContent = 'Remove'; rm.disabled = b.state === 'busy';
+    rm.onclick = async () => {
+      BROLLS.splice(i, 1); drawBrolls();
+      if (b.id) { try { showSpace(await (await fetch(`/api/broll/${b.id}`, { method: 'DELETE' })).json()); } catch {} }
+    };
+    li.append(name, st, rm);
+    ul.append(li);
+  });
+}
+
+// files are sent one after another; the space left is shown as soon as each one has arrived
+$('#bfile').onchange = async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  for (const f of files) {
+    const item = { id: '', name: f.name, state: 'busy', text: 'uploading… 0%' };
+    BROLLS.push(item); drawBrolls(); syncGo();
+    try {
+      const up = await upload(f, 'broll', (p) => { item.text = `uploading… ${p}%`; drawBrolls(); });
+      item.id = up.id;
+      showSpace(up);
+      item.text = `${mbText(up.sizeMB)} uploaded · finding scenes…`; drawBrolls();
+      const r = await job('/api/broll-index', { id: up.id }, (s) => { item.text = `${mbText(up.sizeMB)} · finding scenes… ${s}s`; drawBrolls(); });
+      item.state = 'ready'; item.text = `${mbText(up.sizeMB)} · ${r.scenes} scenes`;
+    } catch (err) {
+      item.state = 'error'; item.text = err.message;
+      if (item.id) { try { showSpace(await (await fetch(`/api/broll/${item.id}`, { method: 'DELETE' })).json()); } catch {} item.id = ''; }
+    }
+    drawBrolls(); syncGo();
+  }
+  $('#bstatus').textContent = brollSrc().length ? `${brollSrc().length} B-roll file${brollSrc().length > 1 ? 's' : ''} ready. They are used on every clip you render now (click Apply edits on clips that are already made).` : '';
+};
+
+async function render(card, id, c) {
+  const btn = card.querySelector('.rb'), box = card.querySelector('.vid');
+  btn.disabled = true; btn.textContent = 'Rendering…'; box.textContent = 'Rendering…';
+  try {
+    const j = await job('/api/render', { id, start: c.start, end: c.end,
+      music: card.querySelector('.music').value, volume: card.querySelector('.vol').value / 100, frame: card.querySelector('.frame').value, broll: card.querySelector('.broll').checked,
+      layout: card.querySelector('.layout').value, trim: card.querySelector('.trim').checked, brollSrc: brollSrc() },
+      (s) => (box.textContent = `Rendering… ${s}s`));
+    box.innerHTML = `<video src="${j.url}" controls playsinline></video>`;
+    card.querySelector('.note').textContent = j.note || '';
+    let dl = card.querySelector('.dl');
+    if (!dl) { dl = document.createElement('a'); dl.className = 'dl'; dl.textContent = 'Download clip'; card.append(dl); }
+    dl.href = j.url; dl.download = c.title.replace(/[^\w ]/g, '') + '.mp4';
+  } catch (e) { box.textContent = 'Render failed: ' + e.message; }
+  btn.disabled = false; btn.textContent = 'Apply edits';
+}
+
+function addCard(id, c, mode) {
+  const card = document.createElement('article');
+  card.className = 'clip';
+  card.innerHTML = `
+    <div class="vid">Waiting…</div>
+    <p class="why note"></p>
+    <div class="row"><span class="score">Virality ${c.score}/100</span><span>${Math.round(c.end - c.start)}s</span></div>
+    <p class="why"></p>
+    <input class="title" aria-label="Title">
+    <textarea class="desc" aria-label="Description"></textarea>
+    <label>Background music<select class="music"></select></label>
+    <label>Layout<select class="layout"><option value="square">9:16 with the footage as a 1:1 square in the middle</option><option value="full">Full 9:16 (fills the screen)</option></select></label>
+    <label>Framing<select class="frame"><option value="auto">Follow speakers (auto)</option><option value="center">Centre crop</option></select></label>
+    <label>Music volume<input class="vol" type="range" min="0" max="200" value="70"></label>
+    <label><input class="broll" type="checkbox" checked>Add B-roll (cut on the beat, inside the picture)</label>
+    <label><input class="trim" type="checkbox" checked>Cut dead air (pauses and silence)</label>
+    <button class="rb alt">Apply edits</button>`;
+  card.querySelector('.why').textContent = c.reason;
+  card.querySelector('.title').value = c.title;
+  card.querySelector('.desc').value = c.description;
+  const ms = card.querySelector('.music');
+  ms.innerHTML = `<option value="">${MUSIC.length ? 'No music' : 'No music files found on server'}</option>` + MUSIC.map((f) => `<option value="${f}">${f.replace(/\.\w+$/, '').replace(/-/g, ' ')}</option>`).join('');
+  const upbeat = MUSIC.filter((f) => f.startsWith('upbeat'));
+  // uploaded footage gets a random upbeat track; YouTube clips follow the mood picked by the AI
+  ms.value = (mode === 'up' && upbeat.length ? upbeat[Math.floor(Math.random() * upbeat.length)] : MUSIC.find((f) => c.mood && f.startsWith(c.mood))) || MUSIC[0] || '';
+  card.querySelector('.layout').value = $('#style').value; // the editing style chosen above
+  card.querySelector('.title').oninput = (e) => (c.title = e.target.value);
+  card.querySelector('.rb').onclick = () => render(card, id, c);
+  $('#grid').append(card);
+  return card;
+}
+
+$('#go').onclick = async () => {
+  const mode = TAB;
+  let body;
+  if (mode === 'yt') {
+    const url = $('#url').value.trim();
+    if (!url) return status('Paste a YouTube link first.', true);
+    body = { url, count: +$('#count').value };
+  } else if (!$('#file').files[0]) return status('Choose a video to upload first.', true);
+  GENERATING = true; syncGo(); $('#grid').innerHTML = '';
+  try {
+    if (mode === 'up') {
+      const { id } = await upload($('#file').files[0], 'main', (p) => status(`Uploading your video… ${p}%`));
+      body = { upload: id, count: +$('#count').value };
+    }
+    status(mode === 'up' ? 'Listening to the video and picking clips. This can take a few minutes…' : 'Downloading video and transcript, then picking clips. This can take a few minutes…');
+    const { id, clips } = await job('/api/analyze', body,
+      (s) => status(`${mode === 'up' ? 'Listening to the video' : 'Downloading, reading the transcript'} and picking clips… ${s}s`));
+    status(`Found ${clips.length} clips. Rendering previews…`);
+    const cards = clips.map((c) => addCard(id, c, mode));
+    for (let i = 0; i < clips.length; i++) await render(cards[i], id, clips[i]);
+    status('Done. Change the music, layout, B-roll or title, then click Apply edits to re-render.');
+  } catch (e) { status(e.message, true); }
+  GENERATING = false; syncGo();
+};
+</script>
+</body>
+</html>
